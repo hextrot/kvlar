@@ -1,0 +1,97 @@
+# Kvlar Community Policy Template — Puppeteer MCP Server
+#
+# Designed for use with @modelcontextprotocol/server-puppeteer.
+# The Puppeteer MCP server provides browser automation capabilities:
+#   puppeteer_navigate, puppeteer_screenshot, puppeteer_click,
+#   puppeteer_fill, puppeteer_select, puppeteer_hover,
+#   puppeteer_evaluate, puppeteer_new_tab, puppeteer_close_tab
+#
+# Enforcement strategy:
+#   - DENY: arbitrary JavaScript execution (puppeteer_evaluate) — high risk
+#   - REQUIRE APPROVAL: form submissions (fill, select, click on buttons)
+#   - REQUIRE APPROVAL: navigation to new URLs
+#   - ALLOW: read-only operations (screenshots, hover)
+#
+# Usage:
+#   kvlar proxy --stdio --policy policies/puppeteer.yaml \
+#     -- npx -y @modelcontextprotocol/server-puppeteer
+
+name: puppeteer
+description: Community policy template for Puppeteer MCP server — browser automation controls
+version: "1.0"
+
+rules:
+  # --- DENY: High-risk operations ---
+
+  - id: deny-evaluate
+    description: Block arbitrary JavaScript execution in the browser context
+    match_on:
+      resources: ["puppeteer_evaluate"]
+    effect:
+      type: deny
+      reason: "Arbitrary JavaScript execution via puppeteer_evaluate is blocked by Kvlar security policy"
+
+  # --- REQUIRE APPROVAL: Stateful/write operations ---
+
+  - id: approve-navigate
+    description: Require approval before navigating to a URL
+    match_on:
+      resources: ["puppeteer_navigate"]
+    effect:
+      type: require_approval
+      reason: "Browser navigation requires human approval — verify the URL is safe"
+
+  - id: approve-fill
+    description: Require approval before filling form fields
+    match_on:
+      resources: ["puppeteer_fill"]
+    effect:
+      type: require_approval
+      reason: "Filling form fields requires human approval — data may be submitted"
+
+  - id: approve-select
+    description: Require approval before selecting dropdown options
+    match_on:
+      resources: ["puppeteer_select"]
+    effect:
+      type: require_approval
+      reason: "Selecting form options requires human approval"
+
+  - id: approve-click
+    description: Require approval before clicking elements
+    match_on:
+      resources: ["puppeteer_click"]
+    effect:
+      type: require_approval
+      reason: "Clicking browser elements requires human approval — may trigger form submissions or navigation"
+
+  - id: approve-new-tab
+    description: Require approval before opening new tabs
+    match_on:
+      resources: ["puppeteer_new_tab"]
+    effect:
+      type: require_approval
+      reason: "Opening new browser tabs requires human approval"
+
+  # --- ALLOW: Read-only operations ---
+
+  - id: allow-screenshot
+    description: Allow capturing screenshots (read-only)
+    match_on:
+      resources: ["puppeteer_screenshot"]
+    effect:
+      type: allow
+
+  - id: allow-hover
+    description: Allow hovering over elements (read-only, no side effects)
+    match_on:
+      resources: ["puppeteer_hover"]
+    effect:
+      type: allow
+
+  - id: allow-close-tab
+    description: Allow closing browser tabs (cleanup operation)
+    match_on:
+      resources: ["puppeteer_close_tab"]
+    effect:
+      type: allow

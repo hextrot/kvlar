@@ -132,9 +132,14 @@ enum Commands {
         dir: Option<PathBuf>,
 
         /// Policy template: default, strict, permissive, filesystem,
-        /// postgres, github, slack, shell.
+        /// postgres, github, slack, shell, puppeteer, brave-search,
+        /// memory, sequential-thinking, sqlite.
         #[arg(long, default_value = "default")]
         template: String,
+
+        /// List all available templates with descriptions.
+        #[arg(long)]
+        list: bool,
     },
 
     /// Wrap existing MCP servers with Kvlar security proxy.
@@ -317,7 +322,7 @@ fn main() {
             agent_id,
             upstream_cmd,
         ),
-        Commands::Init { dir, template } => cmd_init(dir, &template),
+        Commands::Init { dir, template, list } => cmd_init(dir, &template, list),
         Commands::Wrap {
             client,
             config,
@@ -757,13 +762,73 @@ fn policy_template(name: &str) -> Option<&'static str> {
         "default" => Some(include_str!("../policies/default.yaml")),
         "strict" => Some(include_str!("../policies/strict.yaml")),
         "permissive" => Some(include_str!("../policies/permissive.yaml")),
-        "filesystem" => Some(include_str!("../policies/filesystem-demo.yaml")),
+        "filesystem" => Some(include_str!("../policies/filesystem-community.yaml")),
         "postgres" => Some(include_str!("../policies/postgres.yaml")),
         "github" => Some(include_str!("../policies/github.yaml")),
         "slack" => Some(include_str!("../policies/slack.yaml")),
         "shell" => Some(include_str!("../policies/shell.yaml")),
+        "puppeteer" => Some(include_str!("../policies/puppeteer.yaml")),
+        "brave-search" => Some(include_str!("../policies/brave-search.yaml")),
+        "memory" => Some(include_str!("../policies/memory.yaml")),
+        "sequential-thinking" => Some(include_str!("../policies/sequential-thinking.yaml")),
+        "sqlite" => Some(include_str!("../policies/sqlite.yaml")),
         _ => None,
     }
+}
+
+/// Returns all available template names with descriptions (name, description).
+pub fn template_list() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("default", "Default security policy for AI agents"),
+        (
+            "strict",
+            "Maximum security — approve or deny everything except reads",
+        ),
+        (
+            "permissive",
+            "Development-only permissive policy (allow most, deny destructive)",
+        ),
+        (
+            "filesystem",
+            "Community template for MCP filesystem server — read/write/delete controls",
+        ),
+        (
+            "postgres",
+            "Community template for Postgres MCP server — block destructive SQL, gate writes, allow reads",
+        ),
+        (
+            "github",
+            "Community template for GitHub MCP server — read/write/create controls",
+        ),
+        (
+            "slack",
+            "Community template for Slack MCP server — protect against unintended messages",
+        ),
+        (
+            "shell",
+            "Community template for shell/exec MCP servers — deny destructive, approve writes, allow reads",
+        ),
+        (
+            "puppeteer",
+            "Community template for Puppeteer MCP server — browser automation controls",
+        ),
+        (
+            "brave-search",
+            "Community template for Brave Search MCP server — read-only web and local search",
+        ),
+        (
+            "memory",
+            "Community template for Memory MCP server — protect the persistent knowledge graph",
+        ),
+        (
+            "sequential-thinking",
+            "Community template for Sequential Thinking MCP server — allow structured reasoning",
+        ),
+        (
+            "sqlite",
+            "Community template for SQLite MCP server — block destructive SQL, gate writes, allow reads",
+        ),
+    ]
 }
 
 /// Returns all available built-in template names.
@@ -777,6 +842,11 @@ pub fn template_names() -> &'static [&'static str] {
         "github",
         "slack",
         "shell",
+        "puppeteer",
+        "brave-search",
+        "memory",
+        "sequential-thinking",
+        "sqlite",
     ]
 }
 
@@ -806,7 +876,22 @@ fn resolve_policy_extends(policy: &mut kvlar_core::Policy) {
     }
 }
 
-fn cmd_init(dir: Option<PathBuf>, template: &str) {
+fn cmd_init(dir: Option<PathBuf>, template: &str, list: bool) {
+    // --list: show all available templates with descriptions
+    if list {
+        println!("Available kvlar init templates:");
+        println!();
+        let entries = template_list();
+        // Find the longest name for alignment
+        let max_len = entries.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+        for (name, desc) in entries {
+            println!("  {:<width$}  {}", name, desc, width = max_len);
+        }
+        println!();
+        println!("Usage: kvlar init --template <name>");
+        return;
+    }
+
     let target_dir = dir.unwrap_or_else(client_config::default_kvlar_dir);
     let policy_path = target_dir.join("policy.yaml");
 

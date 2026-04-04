@@ -1,0 +1,95 @@
+# Kvlar Community Policy Template — SQLite MCP Server
+#
+# Designed for use with @modelcontextprotocol/server-sqlite.
+# The SQLite MCP server exposes these tools:
+#   read_query        — execute SELECT queries
+#   write_query       — execute INSERT/UPDATE/DELETE queries
+#   create_table      — create new tables
+#   list_tables       — list all tables in the database
+#   describe_table    — get schema for a specific table
+#   append_insight    — add a business insight memo
+#
+# Enforcement strategy:
+#   - DENY: schema-level operations that can destroy data (DROP via write_query)
+#   - REQUIRE APPROVAL: all write operations (write_query, create_table, append_insight)
+#   - ALLOW: all read operations (read_query, list_tables, describe_table)
+#
+# Usage:
+#   kvlar proxy --stdio --policy policies/sqlite.yaml \
+#     -- npx -y @modelcontextprotocol/server-sqlite /path/to/database.db
+
+name: sqlite
+description: Community policy template for SQLite MCP server — block destructive SQL, gate writes, allow reads
+version: "1.0"
+
+rules:
+  # --- DENY: Destructive DDL within write_query ---
+
+  - id: deny-drop-table
+    description: Block DROP TABLE statements via write_query
+    match_on:
+      resources: ["write_query"]
+      parameters:
+        query: "(?i)\\bDROP\\b"
+    effect:
+      type: deny
+      reason: "DROP statements are blocked by Kvlar security policy"
+
+  - id: deny-truncate
+    description: Block TRUNCATE statements via write_query
+    match_on:
+      resources: ["write_query"]
+      parameters:
+        query: "(?i)\\bTRUNCATE\\b"
+    effect:
+      type: deny
+      reason: "TRUNCATE statements are blocked by Kvlar security policy"
+
+  # --- REQUIRE APPROVAL: Write operations ---
+
+  - id: approve-write-query
+    description: Require approval for all INSERT/UPDATE/DELETE queries
+    match_on:
+      resources: ["write_query"]
+    effect:
+      type: require_approval
+      reason: "Write queries require human approval"
+
+  - id: approve-create-table
+    description: Require approval before creating new tables
+    match_on:
+      resources: ["create_table"]
+    effect:
+      type: require_approval
+      reason: "Creating new tables requires human approval"
+
+  - id: approve-append-insight
+    description: Require approval before appending business insight memos
+    match_on:
+      resources: ["append_insight"]
+    effect:
+      type: require_approval
+      reason: "Appending insights requires human approval"
+
+  # --- ALLOW: Read-only operations ---
+
+  - id: allow-read-query
+    description: Allow SELECT queries (read-only)
+    match_on:
+      resources: ["read_query"]
+    effect:
+      type: allow
+
+  - id: allow-list-tables
+    description: Allow listing all tables in the database
+    match_on:
+      resources: ["list_tables"]
+    effect:
+      type: allow
+
+  - id: allow-describe-table
+    description: Allow describing table schemas
+    match_on:
+      resources: ["describe_table"]
+    effect:
+      type: allow

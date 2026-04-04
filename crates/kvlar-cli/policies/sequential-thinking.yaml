@@ -1,0 +1,31 @@
+# Kvlar Community Policy Template — Sequential Thinking MCP Server
+#
+# Designed for use with @modelcontextprotocol/server-sequential-thinking.
+# The Sequential Thinking MCP server exposes a single tool:
+#   sequentialthinking — structured multi-step reasoning tool that helps
+#                        AI agents break down complex problems step by step
+#
+# Enforcement strategy:
+#   - ALLOW: all sequential thinking operations (pure reasoning, no side effects)
+#
+# Note: Sequential Thinking is a reasoning-only tool with no external side effects.
+# This policy is permissive by design — the tool cannot read/write files,
+# execute code, or make network requests. It is safe to allow unconditionally.
+#
+# Usage:
+#   kvlar proxy --stdio --policy policies/sequential-thinking.yaml \
+#     -- npx -y @modelcontextprotocol/server-sequential-thinking
+
+name: sequential-thinking
+description: Community policy template for Sequential Thinking MCP server — allow structured reasoning
+version: "1.0"
+
+rules:
+  # --- ALLOW: Reasoning operations (no side effects) ---
+
+  - id: allow-sequential-thinking
+    description: Allow sequential thinking tool invocations (pure reasoning, no external side effects)
+    match_on:
+      resources: ["sequentialthinking"]
+    effect:
+      type: allow

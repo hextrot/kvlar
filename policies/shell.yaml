@@ -1,0 +1,220 @@
+# Kvlar Community Policy Template — Shell/Exec MCP Servers
+#
+# Designed for shell/exec MCP servers that expose tools like:
+#   run_command, execute, exec, bash, shell, run
+#
+# Enforcement strategy (rules evaluated in order):
+#   1. DENY: Destructive/dangerous commands (rm -rf, mkfs, dd, chmod 777, etc.)
+#   2. DENY: Privilege escalation (sudo, su)
+#   3. DENY: Remote code execution (curl|bash, wget|sh, etc.)
+#   4. DENY: Dangerous system operations (shutdown, reboot, fdisk)
+#   5. REQUIRE APPROVAL: Write/install operations (mv, cp, mkdir, pip install, etc.)
+#   6. ALLOW: Everything else (read-only commands)
+#
+# Usage:
+#   kvlar proxy --stdio --policy policies/shell.yaml \
+#     -- <your-shell-mcp-server>
+
+name: shell-security
+description: Community policy template for shell/exec MCP servers — deny destructive, approve writes, allow reads
+version: "1.0"
+
+rules:
+  # --- DENY: Destructive filesystem operations ---
+
+  - id: deny-rm-rf
+    description: Block recursive forced deletion
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "rm -rf"
+    effect:
+      type: deny
+      reason: "Recursive forced deletion (rm -rf) is not permitted"
+
+  - id: deny-rm-force
+    description: Block forced file deletion
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "rm -f"
+    effect:
+      type: deny
+      reason: "Forced file deletion (rm -f) is not permitted"
+
+  - id: deny-mkfs
+    description: Block filesystem formatting
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "mkfs"
+    effect:
+      type: deny
+      reason: "Filesystem formatting (mkfs) is not permitted"
+
+  - id: deny-dd
+    description: Block raw disk operations
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "dd "
+    effect:
+      type: deny
+      reason: "Raw disk operations (dd) are not permitted"
+
+  - id: deny-chmod-777
+    description: Block world-writable permissions
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "chmod 777"
+    effect:
+      type: deny
+      reason: "Setting world-writable permissions (chmod 777) is not permitted"
+
+  # --- DENY: Privilege escalation ---
+
+  - id: deny-sudo
+    description: Block privilege escalation via sudo
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "sudo "
+    effect:
+      type: deny
+      reason: "Privilege escalation via sudo is not permitted"
+
+  - id: deny-su
+    description: Block user switching via su
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "su "
+    effect:
+      type: deny
+      reason: "User switching via su is not permitted"
+
+  # --- DENY: Remote code execution ---
+
+  - id: deny-pipe-to-bash
+    description: Block piping output to bash
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "| bash"
+    effect:
+      type: deny
+      reason: "Piping output to bash is not permitted"
+
+  - id: deny-pipe-to-sh
+    description: Block piping output to sh
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "| sh"
+    effect:
+      type: deny
+      reason: "Piping output to sh is not permitted"
+
+  # --- DENY: Dangerous system operations ---
+
+  - id: deny-shutdown
+    description: Block system shutdown
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "shutdown"
+    effect:
+      type: deny
+      reason: "System shutdown is not permitted"
+
+  - id: deny-reboot
+    description: Block system reboot
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "reboot"
+    effect:
+      type: deny
+      reason: "System reboot is not permitted"
+
+  # --- REQUIRE APPROVAL: Write/install operations ---
+
+  - id: approve-mv
+    description: Require approval for moving/renaming files
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "mv "
+    effect:
+      type: require_approval
+      reason: "File move/rename operations require human approval"
+
+  - id: approve-cp
+    description: Require approval for copying files
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "cp "
+    effect:
+      type: require_approval
+      reason: "File copy operations require human approval"
+
+  - id: approve-mkdir
+    description: Require approval for creating directories
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "mkdir "
+    effect:
+      type: require_approval
+      reason: "Directory creation requires human approval"
+
+  - id: approve-package-install
+    description: Require approval for package manager installs (pip, npm, apt, brew, cargo)
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+      conditions:
+        - field: command
+          operator: contains
+          value: "install"
+    effect:
+      type: require_approval
+      reason: "Package installation requires human approval"
+
+  # --- ALLOW: Read-only operations ---
+
+  - id: allow-shell-commands
+    description: Allow all other shell commands (read-only by default)
+    match_on:
+      resources: ["run_command", "execute", "exec", "bash", "shell", "run"]
+    effect:
+      type: allow

@@ -147,16 +147,16 @@ description: Integration test for conditions
 version: "1"
 rules:
   - id: deny-large-uploads
-    description: Deny files larger than 10MB
+    description: Deny oversized uploads (not in allowed size range)
     match_on:
       resources: ["upload"]
       conditions:
         - field: size_mb
-          operator: greater_than
-          value: 10
+          operator: not_in
+          value: [1, 2, 3, 4, 5]
     effect:
       type: deny
-      reason: "File too large (>10MB)"
+      reason: "File size outside allowed range"
   - id: deny-sensitive-extensions
     description: Deny sensitive file extensions
     match_on:
@@ -179,7 +179,7 @@ rules:
         .unwrap(),
     );
 
-    // Large file → denied
+    // Oversized file (50MB, not in allowed range [1-5]) → denied
     let large = Action::new("tool_call", "upload", "agent")
         .with_param("size_mb", serde_json::json!(50))
         .with_param("filename", serde_json::json!("data.csv"));

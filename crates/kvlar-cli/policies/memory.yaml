@@ -1,0 +1,101 @@
+# Kvlar Community Policy Template — Memory MCP Server
+#
+# Designed for use with @modelcontextprotocol/server-memory.
+# The Memory MCP server provides a persistent knowledge graph with these tools:
+#   create_entities    — add new entities to the graph
+#   create_relations   — create relationships between entities
+#   add_observations   — add observations/facts to entities
+#   delete_entities    — remove entities from the graph
+#   delete_observations — remove observations from entities
+#   delete_relations   — remove relationships between entities
+#   read_graph         — read the entire knowledge graph
+#   search_nodes       — search for nodes in the graph
+#   open_nodes         — retrieve specific nodes by name
+#
+# Enforcement strategy:
+#   - DENY: entity/relation/observation deletion (irreversible data loss)
+#   - REQUIRE APPROVAL: creating new entities and relations (modifies shared memory)
+#   - ALLOW: read operations and adding observations to existing entities
+#
+# Usage:
+#   kvlar proxy --stdio --policy policies/memory.yaml \
+#     -- npx -y @modelcontextprotocol/server-memory
+
+name: memory
+description: Community policy template for Memory MCP server — protect the persistent knowledge graph
+version: "1.0"
+
+rules:
+  # --- DENY: Irreversible deletion operations ---
+
+  - id: deny-delete-entities
+    description: Block deletion of entities from the knowledge graph
+    match_on:
+      resources: ["delete_entities"]
+    effect:
+      type: deny
+      reason: "Deleting entities from the knowledge graph is blocked by Kvlar security policy"
+
+  - id: deny-delete-observations
+    description: Block deletion of observations from entities
+    match_on:
+      resources: ["delete_observations"]
+    effect:
+      type: deny
+      reason: "Deleting observations from the knowledge graph is blocked by Kvlar security policy"
+
+  - id: deny-delete-relations
+    description: Block deletion of relations between entities
+    match_on:
+      resources: ["delete_relations"]
+    effect:
+      type: deny
+      reason: "Deleting relations from the knowledge graph is blocked by Kvlar security policy"
+
+  # --- REQUIRE APPROVAL: Create/modify operations ---
+
+  - id: approve-create-entities
+    description: Require approval before creating new entities in the knowledge graph
+    match_on:
+      resources: ["create_entities"]
+    effect:
+      type: require_approval
+      reason: "Creating entities in the knowledge graph requires human approval"
+
+  - id: approve-create-relations
+    description: Require approval before creating new relations between entities
+    match_on:
+      resources: ["create_relations"]
+    effect:
+      type: require_approval
+      reason: "Creating relations in the knowledge graph requires human approval"
+
+  # --- ALLOW: Read and low-risk write operations ---
+
+  - id: allow-add-observations
+    description: Allow adding observations/facts to existing entities
+    match_on:
+      resources: ["add_observations"]
+    effect:
+      type: allow
+
+  - id: allow-read-graph
+    description: Allow reading the entire knowledge graph
+    match_on:
+      resources: ["read_graph"]
+    effect:
+      type: allow
+
+  - id: allow-search-nodes
+    description: Allow searching for nodes in the knowledge graph
+    match_on:
+      resources: ["search_nodes"]
+    effect:
+      type: allow
+
+  - id: allow-open-nodes
+    description: Allow retrieving specific nodes by name
+    match_on:
+      resources: ["open_nodes"]
+    effect:
+      type: allow

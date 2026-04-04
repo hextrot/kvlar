@@ -8,7 +8,7 @@ use regex::Regex;
 use crate::action::Action;
 use crate::decision::Decision;
 use crate::error::KvlarError;
-use crate::policy::{Condition, ConditionOperator, Effect, MatchCriteria, Policy, Rule};
+use crate::policy::{Condition, ConditionOperator, DefaultOutcome, Effect, MatchCriteria, Policy, Rule};
 
 /// Characters that indicate a glob pattern (not a plain string).
 const GLOB_META_CHARS: &[char] = &['*', '?', '['];
@@ -116,7 +116,7 @@ impl Engine {
     ///
     /// Rules are checked in order across policies (first policy's rules first).
     /// The first matching rule determines the decision. If no rule matches,
-    /// the action is **denied** (fail-closed security model).
+    /// the policy's `default_outcome` is used (defaults to deny / fail-closed).
     pub fn evaluate(&self, action: &Action) -> Decision {
         for policy in &self.policies {
             for rule in &policy.rules {
@@ -124,9 +124,23 @@ impl Engine {
                     return self.rule_to_decision(rule);
                 }
             }
+            // If this policy matched (had rules) but nothing matched, apply its default_outcome
+            // A policy with no rules is effectively a pass-through.
+            if !policy.rules.is_empty() {
+                match policy.default_outcome.as_ref().unwrap_or(&DefaultOutcome::Deny) {
+                    DefaultOutcome::Allow => {
+                        return Decision::Allow {
+                            matched_rule: "_default_allow".into(),
+                        };
+                    }
+                    DefaultOutcome::Deny => {
+                        // Continue to next policy (or global default)
+                    }
+                }
+            }
         }
 
-        // Default: deny (fail-closed)
+        // Global default: deny (fail-closed)
         Decision::Deny {
             reason: "no matching policy rule — denied by default (fail-closed)".into(),
             matched_rule: "_default_deny".into(),
@@ -196,16 +210,24 @@ impl Engine {
     fn evaluate_condition(&self, action: &Action, condition: &Condition) -> bool {
         let field_value = self.resolve_field(action, &condition.field);
 
-        match &condition.operator {
-            ConditionOperator::Exists => field_value.is_some(),
-            ConditionOperator::NotExists => field_value.is_none(),
-            _ => {
-                let Some(field_val) = field_value else {
-                    return false;
-                };
-                self.compare_values(&field_val, &condition.operator, &condition.value)
-            }
+        // NotIn is true when the field is absent OR not in the array
+        if condition.operator == ConditionOperator::NotIn {
+            return match field_value {
+                None => true, // field absent → not in any array
+                Some(ref fv) => {
+                    if let Some(arr) = condition.value.as_array() {
+                        !arr.contains(fv)
+                    } else {
+                        true
+                    }
+                }
+            };
         }
+
+        let Some(field_val) = field_value else {
+            return false;
+        };
+        self.compare_values(&field_val, &condition.operator, &condition.value)
     }
 
     /// Resolves a field reference from an action.
@@ -250,8 +272,11 @@ impl Engine {
         cond_val: &serde_json::Value,
     ) -> bool {
         match operator {
-            ConditionOperator::Equals => field_val == cond_val,
-            ConditionOperator::NotEquals => field_val != cond_val,
+            // Equality
+            ConditionOperator::Eq => field_val == cond_val,
+            ConditionOperator::Neq => field_val != cond_val,
+
+            // String operators
             ConditionOperator::Contains => {
                 let field_str = field_val.as_str().unwrap_or("");
                 let cond_str = cond_val.as_str().unwrap_or("");
@@ -267,25 +292,50 @@ impl Engine {
                 let cond_str = cond_val.as_str().unwrap_or("");
                 field_str.ends_with(cond_str)
             }
-            ConditionOperator::GreaterThan => {
-                let a = field_val.as_f64();
-                let b = cond_val.as_f64();
-                matches!((a, b), (Some(a), Some(b)) if a > b)
+            ConditionOperator::Matches => {
+                let field_str = field_val.as_str().unwrap_or("");
+                let pattern = cond_val.as_str().unwrap_or("");
+                match Regex::new(pattern) {
+                    Ok(re) => re.is_match(field_str),
+                    Err(_) => false,
+                }
             }
-            ConditionOperator::LessThan => {
-                let a = field_val.as_f64();
-                let b = cond_val.as_f64();
-                matches!((a, b), (Some(a), Some(b)) if a < b)
-            }
-            ConditionOperator::OneOf => {
+
+            // Array membership
+            ConditionOperator::In => {
                 if let Some(arr) = cond_val.as_array() {
                     arr.contains(field_val)
                 } else {
                     false
                 }
             }
-            ConditionOperator::Exists | ConditionOperator::NotExists => {
-                unreachable!("handled above")
+            ConditionOperator::NotIn => {
+                // Handled in evaluate_condition before field resolution
+                unreachable!("NotIn handled before compare_values")
+            }
+
+            // Domain matching
+            ConditionOperator::InDomain => {
+                let field_str = field_val.as_str().unwrap_or("");
+                let host = extract_hostname(field_str);
+                match cond_val {
+                    serde_json::Value::String(domain) => host_in_domain(&host, domain),
+                    serde_json::Value::Array(domains) => domains.iter().any(|d| {
+                        d.as_str().map(|domain| host_in_domain(&host, domain)).unwrap_or(false)
+                    }),
+                    _ => false,
+                }
+            }
+            ConditionOperator::NotInDomain => {
+                let field_str = field_val.as_str().unwrap_or("");
+                let host = extract_hostname(field_str);
+                match cond_val {
+                    serde_json::Value::String(domain) => !host_in_domain(&host, domain),
+                    serde_json::Value::Array(domains) => !domains.iter().any(|d| {
+                        d.as_str().map(|domain| host_in_domain(&host, domain)).unwrap_or(false)
+                    }),
+                    _ => true,
+                }
             }
         }
     }
@@ -306,6 +356,46 @@ impl Engine {
             },
         }
     }
+}
+
+/// Extracts the hostname from a URL or raw hostname string.
+///
+/// Examples:
+/// - `https://api.example.com/path` → `api.example.com`
+/// - `api.example.com` → `api.example.com`
+/// - `https://example.com:8080/` → `example.com`
+fn extract_hostname(input: &str) -> String {
+    // Strip scheme (e.g. "https://")
+    let without_scheme = if let Some(pos) = input.find("://") {
+        &input[pos + 3..]
+    } else {
+        input
+    };
+    // Strip path and query
+    let host_and_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    // Strip port
+    let host = if host_and_port.starts_with('[') {
+        // IPv6 address like [::1]:8080
+        host_and_port
+            .split(']')
+            .next()
+            .map(|s| s.trim_start_matches('['))
+            .unwrap_or(host_and_port)
+    } else {
+        host_and_port.split(':').next().unwrap_or(host_and_port)
+    };
+    host.to_lowercase()
+}
+
+/// Returns true if `host` is exactly `domain` or is a subdomain of `domain`.
+///
+/// Examples:
+/// - `host_in_domain("api.example.com", "example.com")` → true
+/// - `host_in_domain("example.com", "example.com")` → true
+/// - `host_in_domain("evil.com", "example.com")` → false
+fn host_in_domain(host: &str, domain: &str) -> bool {
+    let domain = domain.to_lowercase();
+    host == domain || host.ends_with(&format!(".{domain}"))
 }
 
 impl Default for Engine {
@@ -518,7 +608,7 @@ rules:
       resources: ["read_file"]
       conditions:
         - field: path
-          operator: equals
+          operator: eq
           value: "/etc/passwd"
     effect:
       type: deny
@@ -582,25 +672,25 @@ rules:
     }
 
     #[test]
-    fn test_condition_greater_than() {
+    fn test_condition_matches() {
         let mut engine = Engine::new();
         engine
             .load_policy_yaml(
                 r#"
-name: cond-gt
+name: cond-matches
 description: test
 version: "1"
 rules:
-  - id: deny-large-request
-    description: Deny large requests
+  - id: deny-sensitive-paths
+    description: Deny access to sensitive system paths via regex
     match_on:
       conditions:
-        - field: size
-          operator: greater_than
-          value: 1000
+        - field: path
+          operator: matches
+          value: "^/(etc|root|proc)/"
     effect:
       type: deny
-      reason: "Too large"
+      reason: "Sensitive system path"
   - id: allow-all
     description: allow
     match_on: {}
@@ -611,34 +701,34 @@ rules:
             .unwrap();
 
         let action =
-            Action::new("tool_call", "upload", "a").with_param("size", serde_json::json!(5000));
+            Action::new("tool_call", "read_file", "a").with_param("path", serde_json::json!("/etc/shadow"));
         assert!(engine.evaluate(&action).is_denied());
 
         let action2 =
-            Action::new("tool_call", "upload", "a").with_param("size", serde_json::json!(500));
+            Action::new("tool_call", "read_file", "a").with_param("path", serde_json::json!("/tmp/safe.txt"));
         assert!(engine.evaluate(&action2).is_allowed());
     }
 
     #[test]
-    fn test_condition_exists() {
+    fn test_condition_not_in() {
         let mut engine = Engine::new();
         engine
             .load_policy_yaml(
                 r#"
-name: cond-exists
+name: cond-not-in
 description: test
 version: "1"
 rules:
-  - id: require-token
-    description: Deny if no auth token present
+  - id: deny-non-approved-methods
+    description: Deny HTTP methods not in the approved list
     match_on:
       conditions:
-        - field: auth_token
-          operator: not_exists
-          value: null
+        - field: method
+          operator: not_in
+          value: ["GET", "POST"]
     effect:
       type: deny
-      reason: "Missing auth token"
+      reason: "HTTP method not approved"
   - id: allow-all
     description: allow
     match_on: {}
@@ -648,23 +738,24 @@ rules:
             )
             .unwrap();
 
-        // No token → denied
-        let action = Action::new("tool_call", "api_call", "a");
+        // DELETE is not in [GET, POST] → denied
+        let action = Action::new("tool_call", "api_call", "a")
+            .with_param("method", serde_json::json!("DELETE"));
         assert!(engine.evaluate(&action).is_denied());
 
-        // Has token → allowed
+        // GET is in [GET, POST] → allowed
         let action2 = Action::new("tool_call", "api_call", "a")
-            .with_param("auth_token", serde_json::json!("abc123"));
+            .with_param("method", serde_json::json!("GET"));
         assert!(engine.evaluate(&action2).is_allowed());
     }
 
     #[test]
-    fn test_condition_one_of() {
+    fn test_condition_in() {
         let mut engine = Engine::new();
         engine
             .load_policy_yaml(
                 r#"
-name: cond-oneof
+name: cond-in
 description: test
 version: "1"
 rules:
@@ -673,7 +764,7 @@ rules:
     match_on:
       conditions:
         - field: method
-          operator: one_of
+          operator: in
           value: ["DELETE", "PUT", "PATCH"]
     effect:
       type: deny
@@ -711,7 +802,7 @@ rules:
     match_on:
       conditions:
         - field: user.role
-          operator: equals
+          operator: eq
           value: "admin"
     effect:
       type: deny
@@ -984,5 +1075,146 @@ rules:
                 .evaluate(&Action::new("tool_call", "x", "a"))
                 .is_allowed()
         );
+    }
+
+    #[test]
+    fn test_condition_in_domain() {
+        let mut engine = Engine::new();
+        engine
+            .load_policy_yaml(
+                r#"
+name: cond-domain
+description: test
+version: "1"
+rules:
+  - id: allow-internal
+    description: Allow requests to internal domains
+    match_on:
+      conditions:
+        - field: url
+          operator: in_domain
+          value: "company.internal"
+    effect:
+      type: allow
+  - id: deny-all
+    description: Deny everything else
+    match_on: {}
+    effect:
+      type: deny
+      reason: "External domain"
+"#,
+            )
+            .unwrap();
+
+        // Exact domain → allowed
+        let action = Action::new("tool_call", "http", "a")
+            .with_param("url", serde_json::json!("https://company.internal/api"));
+        assert!(engine.evaluate(&action).is_allowed());
+
+        // Subdomain → allowed
+        let action2 = Action::new("tool_call", "http", "a")
+            .with_param("url", serde_json::json!("https://api.company.internal/v1/users"));
+        assert!(engine.evaluate(&action2).is_allowed());
+
+        // Different domain → denied
+        let action3 = Action::new("tool_call", "http", "a")
+            .with_param("url", serde_json::json!("https://evil.com/steal"));
+        assert!(engine.evaluate(&action3).is_denied());
+
+        // Domain that ends with but isn't subdomain → denied
+        let action4 = Action::new("tool_call", "http", "a")
+            .with_param("url", serde_json::json!("https://notcompany.internal/"));
+        assert!(engine.evaluate(&action4).is_denied());
+    }
+
+    #[test]
+    fn test_condition_not_in_domain() {
+        let mut engine = Engine::new();
+        engine
+            .load_policy_yaml(
+                r#"
+name: cond-not-domain
+description: test
+version: "1"
+rules:
+  - id: deny-external
+    description: Deny requests outside trusted domains
+    match_on:
+      conditions:
+        - field: url
+          operator: not_in_domain
+          value: ["trusted.com", "safe.io"]
+    effect:
+      type: deny
+      reason: "Untrusted external domain"
+  - id: allow-all
+    description: Allow trusted domains
+    match_on: {}
+    effect:
+      type: allow
+"#,
+            )
+            .unwrap();
+
+        // Trusted domain → not denied (allow)
+        let action = Action::new("tool_call", "http", "a")
+            .with_param("url", serde_json::json!("https://api.trusted.com/data"));
+        assert!(engine.evaluate(&action).is_allowed());
+
+        // Other trusted domain → not denied (allow)
+        let action2 = Action::new("tool_call", "http", "a")
+            .with_param("url", serde_json::json!("https://safe.io/endpoint"));
+        assert!(engine.evaluate(&action2).is_allowed());
+
+        // Untrusted domain → denied
+        let action3 = Action::new("tool_call", "http", "a")
+            .with_param("url", serde_json::json!("https://malicious.xyz/exfil"));
+        assert!(engine.evaluate(&action3).is_denied());
+    }
+
+    #[test]
+    fn test_default_outcome_allow() {
+        let mut engine = Engine::new();
+        engine
+            .load_policy_yaml(
+                r#"
+name: permissive
+description: test
+version: "1"
+default_outcome: allow
+rules:
+  - id: deny-bash
+    description: Deny bash
+    match_on:
+      resources: ["bash"]
+    effect:
+      type: deny
+      reason: "No bash"
+"#,
+            )
+            .unwrap();
+
+        // bash is denied by explicit rule
+        assert!(engine.evaluate(&Action::new("t", "bash", "a")).is_denied());
+
+        // Unknown resource → allowed by default_outcome: allow
+        assert!(engine.evaluate(&Action::new("t", "read_file", "a")).is_allowed());
+    }
+
+    #[test]
+    fn test_hostname_extraction() {
+        assert_eq!(extract_hostname("https://api.example.com/path"), "api.example.com");
+        assert_eq!(extract_hostname("http://example.com:8080/"), "example.com");
+        assert_eq!(extract_hostname("example.com"), "example.com");
+        assert_eq!(extract_hostname("https://UPPER.CASE.COM/"), "upper.case.com");
+    }
+
+    #[test]
+    fn test_host_in_domain_helper() {
+        assert!(host_in_domain("example.com", "example.com"));
+        assert!(host_in_domain("api.example.com", "example.com"));
+        assert!(host_in_domain("deep.sub.example.com", "example.com"));
+        assert!(!host_in_domain("notexample.com", "example.com"));
+        assert!(!host_in_domain("evil.com", "example.com"));
     }
 }

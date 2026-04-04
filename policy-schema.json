@@ -1,0 +1,313 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Policy",
+  "description": "A security policy containing rules for evaluating agent actions.",
+  "type": "object",
+  "required": [
+    "description",
+    "name",
+    "rules",
+    "version"
+  ],
+  "properties": {
+    "default_outcome": {
+      "description": "What to do when no rule matches. Defaults to deny (fail-closed).",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DefaultOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "description": {
+      "description": "Description of what this policy enforces.",
+      "type": "string"
+    },
+    "extends": {
+      "description": "Optional list of base policies to extend. Base policy rules are appended after this policy's rules, so this policy's rules take priority (first-match wins). Values can be built-in names (\"postgres\", \"github\", \"slack\", \"shell\", \"default\", \"strict\", \"permissive\", \"filesystem\") or file paths.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "name": {
+      "description": "Human-readable name for this policy.",
+      "type": "string"
+    },
+    "rules": {
+      "description": "The rules in this policy, evaluated in order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Rule"
+      }
+    },
+    "version": {
+      "description": "Version of this policy (for tracking changes).",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "Condition": {
+      "description": "A conditional expression for matching action parameters.\n\nConditions allow more expressive matching than regex patterns, supporting equality checks, containment, numeric comparisons, and more.",
+      "type": "object",
+      "required": [
+        "field",
+        "operator",
+        "value"
+      ],
+      "properties": {
+        "field": {
+          "description": "The parameter key to check (dot-notation for nested: \"args.path\").",
+          "type": "string"
+        },
+        "operator": {
+          "description": "The comparison operator.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionOperator"
+            }
+          ]
+        },
+        "value": {
+          "description": "The value to compare against."
+        }
+      }
+    },
+    "ConditionOperator": {
+      "description": "Canonical comparison operators for conditions.\n\nThese 10 operators form the cross-engine canonical set shared by the Rust SDK, TypeScript SDK, and SHIELD evaluator.",
+      "oneOf": [
+        {
+          "description": "Field equals value exactly.",
+          "type": "string",
+          "enum": [
+            "eq"
+          ]
+        },
+        {
+          "description": "Field does not equal value.",
+          "type": "string",
+          "enum": [
+            "neq"
+          ]
+        },
+        {
+          "description": "String field contains value as substring.",
+          "type": "string",
+          "enum": [
+            "contains"
+          ]
+        },
+        {
+          "description": "String field starts with the given prefix.",
+          "type": "string",
+          "enum": [
+            "starts_with"
+          ]
+        },
+        {
+          "description": "String field ends with the given suffix.",
+          "type": "string",
+          "enum": [
+            "ends_with"
+          ]
+        },
+        {
+          "description": "String field matches a regular expression.",
+          "type": "string",
+          "enum": [
+            "matches"
+          ]
+        },
+        {
+          "description": "Field value is contained in the given array.",
+          "type": "string",
+          "enum": [
+            "in"
+          ]
+        },
+        {
+          "description": "Field value is NOT contained in the given array.",
+          "type": "string",
+          "enum": [
+            "not_in"
+          ]
+        },
+        {
+          "description": "URL/hostname field is within the given domain (or one of the given domains).",
+          "type": "string",
+          "enum": [
+            "in_domain"
+          ]
+        },
+        {
+          "description": "URL/hostname field is NOT within the given domain (or any of the given domains).",
+          "type": "string",
+          "enum": [
+            "not_in_domain"
+          ]
+        }
+      ]
+    },
+    "DefaultOutcome": {
+      "description": "What to do when no rule matches.",
+      "oneOf": [
+        {
+          "description": "Allow the action when no rule matches.",
+          "type": "string",
+          "enum": [
+            "allow"
+          ]
+        },
+        {
+          "description": "Deny the action when no rule matches (default, fail-closed).",
+          "type": "string",
+          "enum": [
+            "deny"
+          ]
+        }
+      ]
+    },
+    "Effect": {
+      "description": "The effect of a matched rule.",
+      "oneOf": [
+        {
+          "description": "Allow the action.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "allow"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Deny the action with a reason.",
+          "type": "object",
+          "required": [
+            "reason",
+            "type"
+          ],
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "deny"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Require human approval.",
+          "type": "object",
+          "required": [
+            "reason",
+            "type"
+          ],
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "require_approval"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "MatchCriteria": {
+      "description": "Criteria for matching an action to a rule.",
+      "type": "object",
+      "properties": {
+        "action_types": {
+          "description": "Action types to match (e.g., \"tool_call\"). Empty = match all.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agent_ids": {
+          "description": "Agent IDs to match. Empty = match all agents.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "conditions": {
+          "description": "Conditional expressions for advanced parameter matching. Each condition must be satisfied for the rule to match.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Condition"
+          }
+        },
+        "parameters": {
+          "description": "Parameter patterns to match (key = param name, value = regex pattern).",
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "resources": {
+          "description": "Resources to match (e.g., \"bash\", \"send_email\"). Empty = match all.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Rule": {
+      "description": "A single rule within a policy.",
+      "type": "object",
+      "required": [
+        "description",
+        "effect",
+        "id",
+        "match_on"
+      ],
+      "properties": {
+        "description": {
+          "description": "Human-readable description.",
+          "type": "string"
+        },
+        "effect": {
+          "description": "What to do when this rule matches.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Effect"
+            }
+          ]
+        },
+        "id": {
+          "description": "Unique identifier for this rule.",
+          "type": "string"
+        },
+        "match_on": {
+          "description": "What this rule matches on.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MatchCriteria"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

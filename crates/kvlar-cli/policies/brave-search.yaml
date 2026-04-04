@@ -1,0 +1,38 @@
+# Kvlar Community Policy Template — Brave Search MCP Server
+#
+# Designed for use with @modelcontextprotocol/server-brave-search.
+# The Brave Search MCP server exposes two tools:
+#   brave_web_search  — perform web searches
+#   brave_local_search — search for local businesses/places
+#
+# Enforcement strategy:
+#   - ALLOW: all search operations (read-only, no side effects)
+#
+# Note: Brave Search is a read-only API — all operations are safe.
+# This policy is permissive by design, serving as a baseline template
+# that users can tighten (e.g., rate-limit by adding conditions).
+#
+# Usage:
+#   kvlar proxy --stdio --policy policies/brave-search.yaml \
+#     -- npx -y @modelcontextprotocol/server-brave-search
+
+name: brave-search
+description: Community policy template for Brave Search MCP server — read-only web and local search
+version: "1.0"
+
+rules:
+  # --- ALLOW: Web search operations ---
+
+  - id: allow-web-search
+    description: Allow web search queries (read-only, no side effects)
+    match_on:
+      resources: ["brave_web_search"]
+    effect:
+      type: allow
+
+  - id: allow-local-search
+    description: Allow local search queries for businesses and places (read-only)
+    match_on:
+      resources: ["brave_local_search"]
+    effect:
+      type: allow

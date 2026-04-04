@@ -3,6 +3,16 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// What to do when no rule matches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultOutcome {
+    /// Allow the action when no rule matches.
+    Allow,
+    /// Deny the action when no rule matches (default, fail-closed).
+    Deny,
+}
+
 /// A security policy containing rules for evaluating agent actions.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Policy {
@@ -14,6 +24,10 @@ pub struct Policy {
 
     /// Version of this policy (for tracking changes).
     pub version: String,
+
+    /// What to do when no rule matches. Defaults to deny (fail-closed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_outcome: Option<DefaultOutcome>,
 
     /// Optional list of base policies to extend.
     /// Base policy rules are appended after this policy's rules,
@@ -84,30 +98,33 @@ pub struct Condition {
     pub value: serde_json::Value,
 }
 
-/// Comparison operators for conditions.
+/// Canonical comparison operators for conditions.
+///
+/// These 10 operators form the cross-engine canonical set shared by the
+/// Rust SDK, TypeScript SDK, and SHIELD evaluator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConditionOperator {
     /// Field equals value exactly.
-    Equals,
+    Eq,
     /// Field does not equal value.
-    NotEquals,
+    Neq,
     /// String field contains value as substring.
     Contains,
-    /// String field starts with value.
+    /// String field starts with the given prefix.
     StartsWith,
-    /// String field ends with value.
+    /// String field ends with the given suffix.
     EndsWith,
-    /// Numeric field is greater than value.
-    GreaterThan,
-    /// Numeric field is less than value.
-    LessThan,
-    /// Field exists (value is ignored).
-    Exists,
-    /// Field does not exist (value is ignored).
-    NotExists,
-    /// String field matches one of the listed values.
-    OneOf,
+    /// String field matches a regular expression.
+    Matches,
+    /// Field value is contained in the given array.
+    In,
+    /// Field value is NOT contained in the given array.
+    NotIn,
+    /// URL/hostname field is within the given domain (or one of the given domains).
+    InDomain,
+    /// URL/hostname field is NOT within the given domain (or any of the given domains).
+    NotInDomain,
 }
 
 /// The effect of a matched rule.
@@ -246,6 +263,7 @@ rules:
             name: "roundtrip".into(),
             description: "Test roundtrip".into(),
             version: "1.0".into(),
+            default_outcome: None,
             extends: vec![],
             rules: vec![],
         };
@@ -460,6 +478,7 @@ rules:
             name: "test".into(),
             description: "Test".into(),
             version: "1.0".into(),
+            default_outcome: None,
             extends: vec![],
             rules: vec![],
         };
