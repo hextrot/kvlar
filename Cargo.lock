@@ -740,12 +740,14 @@ dependencies = [
 
 [[package]]
 name = "kvlar-audit"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -753,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "kvlar-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -773,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "kvlar-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "kvlar-audit",
@@ -789,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "kvlar-proxy"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "kvlar-audit",
  "kvlar-core",

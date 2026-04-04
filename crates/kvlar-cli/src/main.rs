@@ -109,6 +109,16 @@ enum Commands {
         #[arg(long)]
         health: Option<String>,
 
+        /// SHIELD cloud API key (enables cloud mode escalation + audit forwarding).
+        /// Get your API key from https://app.kvlar.io/settings/api-keys
+        #[arg(long)]
+        api_key: Option<String>,
+
+        /// Agent ID registered in SHIELD (UUID).
+        /// Required for cloud mode to associate audit events with the correct agent.
+        #[arg(long)]
+        agent_id: Option<String>,
+
         /// Upstream MCP server command and arguments (everything after `--`).
         /// Only used with --stdio.
         #[arg(last = true)]
@@ -155,6 +165,15 @@ enum Commands {
         /// Show what would change without writing.
         #[arg(long)]
         dry_run: bool,
+
+        /// SHIELD cloud API key (written into generated proxy config).
+        /// Get your API key from https://app.kvlar.io/settings/api-keys
+        #[arg(long)]
+        api_key: Option<String>,
+
+        /// Agent ID registered in SHIELD (UUID).
+        #[arg(long)]
+        agent_id: Option<String>,
     },
 
     /// Unwrap MCP servers — remove Kvlar proxy wrapping.
@@ -281,6 +300,8 @@ fn main() {
             approval_webhook,
             approval_timeout,
             health,
+            api_key,
+            agent_id,
             upstream_cmd,
         } => cmd_proxy(
             config.as_deref(),
@@ -292,6 +313,8 @@ fn main() {
             approval_webhook,
             approval_timeout,
             health,
+            api_key,
+            agent_id,
             upstream_cmd,
         ),
         Commands::Init { dir, template } => cmd_init(dir, &template),
@@ -302,7 +325,9 @@ fn main() {
             only,
             skip,
             dry_run,
-        } => cmd_wrap(client, config, policy, only, skip, dry_run),
+            api_key,
+            agent_id,
+        } => cmd_wrap(client, config, policy, only, skip, dry_run, api_key, agent_id),
         Commands::Unwrap {
             client,
             config,
@@ -473,6 +498,8 @@ fn cmd_proxy(
     approval_webhook: Option<String>,
     approval_timeout: u64,
     health: Option<String>,
+    api_key: Option<String>,
+    agent_id: Option<String>,
     upstream_cmd: Vec<String>,
 ) {
     // Load config
@@ -503,6 +530,14 @@ fn cmd_proxy(
 
     if let Some(addr) = health {
         config.health_addr = Some(addr);
+    }
+
+    // Cloud mode: apply API key and agent ID
+    if let Some(key) = api_key {
+        config.kvlar_api_key = Some(key);
+    }
+    if let Some(id) = agent_id {
+        config.kvlar_agent_id = Some(id);
     }
 
     // Apply stdio mode from CLI flag
@@ -563,14 +598,29 @@ fn cmd_proxy(
         )
         .init();
 
-    // Build approval backend if webhook URL is provided
-    let approval_backend: Option<std::sync::Arc<dyn kvlar_proxy::ApprovalBackend>> =
-        approval_webhook.map(|url| {
-            eprintln!("  Approval webhook: {}", url);
-            let timeout = std::time::Duration::from_secs(approval_timeout);
-            std::sync::Arc::new(kvlar_proxy::WebhookApprovalBackend::new(url, timeout))
-                as std::sync::Arc<dyn kvlar_proxy::ApprovalBackend>
-        });
+    // Build approval backend — prefer SHIELD cloud if API key set, else webhook
+    let approval_backend: Option<std::sync::Arc<dyn kvlar_proxy::ApprovalBackend>> = {
+        let timeout = std::time::Duration::from_secs(approval_timeout);
+        if let Some(ref key) = config.kvlar_api_key {
+            let shield_url = config.kvlar_cloud_url.clone()
+                .unwrap_or_else(|| "https://app.kvlar.io".to_string());
+            eprintln!("  Cloud mode: SHIELD escalations at {}", shield_url);
+            if let Some(ref id) = config.kvlar_agent_id {
+                eprintln!("  Agent ID: {}", id);
+            }
+            Some(std::sync::Arc::new(kvlar_proxy::ShieldApprovalBackend::new(
+                shield_url,
+                key.clone(),
+                timeout,
+            )) as std::sync::Arc<dyn kvlar_proxy::ApprovalBackend>)
+        } else {
+            approval_webhook.map(|url| {
+                eprintln!("  Approval webhook: {}", url);
+                std::sync::Arc::new(kvlar_proxy::WebhookApprovalBackend::new(url, timeout))
+                    as std::sync::Arc<dyn kvlar_proxy::ApprovalBackend>
+            })
+        }
+    };
 
     // Determine if hot-reload is enabled (CLI flag or config)
     let hot_reload = watch || config.hot_reload;
@@ -812,6 +862,11 @@ fn cmd_init(dir: Option<PathBuf>, template: &str) {
         policy_path.display()
     );
     println!("  2. Secure your MCP servers: kvlar wrap");
+    println!();
+    println!("Cloud mode (optional):");
+    println!("  Connect to SHIELD for centralized policy management and audit logs:");
+    println!("    kvlar wrap --api-key kvlar_sk_... --agent-id <uuid>");
+    println!("  Get your API key at https://app.kvlar.io/settings/api-keys");
 }
 
 fn cmd_wrap(
@@ -821,6 +876,8 @@ fn cmd_wrap(
     only: Vec<String>,
     skip: Vec<String>,
     dry_run: bool,
+    api_key: Option<String>,
+    agent_id: Option<String>,
 ) {
     // Resolve policy path
     let policy_path = policy.unwrap_or_else(client_config::default_policy_path);
@@ -967,6 +1024,24 @@ fn cmd_wrap(
         "✓ Wrapped {}/{} servers. Restart {} to apply.",
         wrapped_count, total, client_label
     );
+
+    // Cloud mode instructions
+    if api_key.is_some() || agent_id.is_some() {
+        println!();
+        println!("Cloud mode configured:");
+        if let Some(ref key) = api_key {
+            println!("  API key:  {}...", &key[..key.len().min(16)]);
+        }
+        if let Some(ref id) = agent_id {
+            println!("  Agent ID: {}", id);
+        }
+        println!("  Add --api-key and --agent-id to the kvlar proxy args in your MCP client config.");
+    } else {
+        println!();
+        println!("Tip: Connect to SHIELD cloud for centralized policy management:");
+        println!("  kvlar wrap --api-key kvlar_sk_... --agent-id <uuid>");
+        println!("  Get your API key at https://app.kvlar.io/settings/api-keys");
+    }
 }
 
 fn cmd_unwrap(

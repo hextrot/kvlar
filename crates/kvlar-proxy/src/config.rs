@@ -61,6 +61,25 @@ pub struct ProxyConfig {
     /// Only used in TCP mode. Set to enable `GET /health` liveness probe.
     #[serde(default)]
     pub health_addr: Option<String>,
+
+    /// SHIELD cloud base URL (e.g., "https://app.kvlar.io").
+    /// When set with `kvlar_api_key`, enables cloud escalation and audit forwarding.
+    #[serde(default)]
+    pub kvlar_cloud_url: Option<String>,
+
+    /// API key for SHIELD cloud authentication (`kvlar_sk_...`).
+    #[serde(default)]
+    pub kvlar_api_key: Option<String>,
+
+    /// Agent ID registered in SHIELD (UUID).
+    /// Used to associate proxy audit events with a specific agent.
+    #[serde(default)]
+    pub kvlar_agent_id: Option<String>,
+
+    /// RADAR cloud base URL (e.g., "https://radar.kvlar.io").
+    /// When set, audit events are also forwarded to RADAR.
+    #[serde(default)]
+    pub kvlar_radar_url: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -81,6 +100,10 @@ impl Default for ProxyConfig {
             upstream_command: None,
             upstream_args: Vec::new(),
             health_addr: None,
+            kvlar_cloud_url: None,
+            kvlar_api_key: None,
+            kvlar_agent_id: None,
+            kvlar_radar_url: None,
         }
     }
 }

@@ -11,10 +11,12 @@
 pub mod event;
 pub mod export;
 pub mod logger;
+pub mod sink;
 
 pub use event::{AuditEvent, EventOutcome};
 pub use export::{ExportFilter, ExportFormat, export_events, export_from_file};
 pub use logger::AuditLogger;
+pub use sink::{CloudSinkConfig, KvlarCloudSink};
 
 /// Library version, pulled from Cargo.toml at compile time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

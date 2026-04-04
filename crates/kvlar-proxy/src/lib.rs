@@ -22,6 +22,7 @@ pub mod handler;
 pub mod health;
 pub mod mcp;
 pub mod proxy;
+pub mod shield_approval;
 pub mod shutdown;
 pub mod stdio;
 pub mod watcher;
@@ -31,6 +32,7 @@ pub use approval::{
 };
 pub use config::ProxyConfig;
 pub use mcp::{McpMessage, McpRequest, McpResponse, ToolCallParams};
+pub use shield_approval::ShieldApprovalBackend;
 
 /// Library version, pulled from Cargo.toml at compile time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
