@@ -1,0 +1,129 @@
+# Ralph Progress Log — Kvlar
+Started: 2026-03-04
+
+## Codebase Patterns
+- kvlar-core must remain pure (no I/O, no async) — ADR-003
+- Fail-closed default: deny if no rule matches
+- Publish crates in dependency order: kvlar-audit, kvlar-core, kvlar-proxy, kvlar-cli
+- Binary name is 'kvlar' (not kvlar-cli), set via [[bin]] in Cargo.toml
+- MCP denials use tool results with isError:true (not JSON-RPC errors)
+- All proxy watcher/reload messages go to stderr (stdio safety)
+- Rust 2024 edition, Apache 2.0 license
+- Arc<RwLock<Engine>> for concurrent policy evaluation with exclusive hot-reload writes
+- notify crate v7 for filesystem watching (FSEvents on macOS, inotify on Linux)
+- 300ms debounce on file watcher to coalesce rapid editor saves
+- ExtendsResolver type: Arc<dyn Fn(&str) -> Result<String, KvlarError> + Send + Sync>
+---
+
+## 2026-03-04 — US-001: Publish v0.2.0 crates to crates.io
+- Published all 4 crates in dependency order: kvlar-audit → kvlar-core → kvlar-proxy → kvlar-cli
+- All at v0.2.0, all verified on crates.io
+- `cargo install kvlar-cli` now installs v0.2.0
+- **Learnings:**
+  - yanked packages in Cargo.lock (js-sys 0.3.88, wasm-bindgen 0.2.111) generate warnings but don't block publish
+  - crates.io waits for availability confirmation after upload
+---
+
+## 2026-03-04 — US-002: Structured error responses
+- Added `ErrorDetail` struct to kvlar-core/src/decision.rs (code, decision, rule_id, reason)
+- Added `error_detail()` method to `Decision` enum
+- Distinguished `POLICY_DEFAULT_DENY` vs `POLICY_DENY` error codes
+- Updated proxy MCP responses with `_kvlar` metadata field
+- Exported `ErrorDetail` from kvlar-core public API
+- 6 new tests, 101 total unit tests passing
+- Files: kvlar-core/src/decision.rs, kvlar-core/src/lib.rs, kvlar-proxy/src/mcp.rs
+- **Learnings:**
+  - `_kvlar` prefixed metadata field is backward compatible with MCP clients
+  - ErrorDetail stays in kvlar-core (pure, serializable), proxy embeds it in JSON
+---
+
+## 2026-03-04 — US-003: Human approval webhook — core types and trait
+- Created kvlar-core/src/approval.rs: ApprovalRequest, ApprovalResponse types (pure, serializable)
+- Created kvlar-proxy/src/approval.rs: ApprovalBackend trait, DenyAllApprovalBackend, ApprovalError
+- Used Pin<Box<dyn Future>> for object safety (no async_trait dep needed)
+- 8 new tests (6 core, 2 proxy), 109 total
+- Files: kvlar-core/src/approval.rs, kvlar-core/src/lib.rs, kvlar-proxy/src/approval.rs, kvlar-proxy/src/lib.rs
+- **Learnings:**
+  - Rust 2024 native async traits aren't dyn-compatible — use Pin<Box<dyn Future>> for dyn dispatch
+  - Keep request/response types in kvlar-core (pure), async trait in kvlar-proxy
+---
+
+## 2026-03-04 — US-004: Human approval webhook — HTTP webhook transport
+- Added WebhookApprovalBackend to kvlar-proxy/src/approval.rs (reqwest-based)
+- Integrated approval flow into handler.rs: RequireApproval → webhook → approve/deny → forward/block
+- Added `with_approval_backend()` builder method on StdioTransport
+- Added `--approval-webhook` and `--approval-timeout` CLI flags
+- Added reqwest to workspace deps (rustls-tls, json features)
+- Used #[allow(clippy::too_many_arguments)] for run_proxy_loop and cmd_proxy (8+ params now)
+- Files: handler.rs, stdio.rs, proxy.rs, approval.rs, main.rs, Cargo.toml (workspace + proxy)
+- **Learnings:**
+  - reqwest::Client::clone() is cheap (Arc internally) — safe to clone into async blocks
+  - Synchronous webhook pattern is simplest MVP — webhook responds inline with ApprovalResponse
+  - Approval backend errors fall through to default approval_required_response (fail-safe)
+  - StdioTransport needs builder pattern for optional features (approval_backend, hot-reload)
+---
+
+## 2026-03-04 — US-005: Python SDK — ADR and subprocess wrapper
+- Created ADR-005 at docs/adr/005-python-sdk-subprocess.md
+- Created sdks/python/ package: pyproject.toml, kvlar/__init__.py, kvlar/engine.py
+- KvlarEngine class wraps `kvlar` CLI via subprocess.run()
+- Methods: evaluate(action) → EvalResult, test_policy(file) → TestResult, validate() → bool
+- Decision enum: ALLOW, DENY, REQUIRE_APPROVAL
+- 18 pytest tests passing (all mocked — no binary dependency for tests)
+- Files: sdks/python/kvlar/engine.py, sdks/python/kvlar/__init__.py, sdks/python/tests/test_engine.py, sdks/python/pyproject.toml
+- **Learnings:**
+  - shutil.which() check in __init__ gives clear error if kvlar binary missing
+  - JSON output fallback to human-readable parsing makes SDK resilient to CLI output changes
+  - unittest.mock.patch on subprocess.run keeps tests fast and binary-independent
+  - @dataclass TestResult triggers PytestCollectionWarning (harmless — pytest tries to collect classes named Test*)
+---
+
+## 2026-03-04 — US-006: Integration tests with real MCP server
+- Created kvlar-proxy/tests/mcp_integration.rs with 4 tests
+- Tests spawn @modelcontextprotocol/server-filesystem via npx as real upstream
+- Uses run_proxy_loop with in-memory client buffers + real child process upstream
+- Tests: allowed passthrough, deny blocked, require_approval blocked, non-tool-call passthrough
+- All marked #[ignore] — excluded from default `cargo test --workspace`
+- Run with: `cargo test --test mcp_integration -- --ignored`
+- All 4 pass against real filesystem MCP server
+- **Learnings:**
+  - Policy YAML requires `description` field on both policy and each rule (serde strict deserialization)
+  - timeout(15s) around run_proxy_loop prevents hang — upstream reader blocks after client EOF
+  - npx -y flag auto-installs the package without confirmation prompt
+  - No startup delay needed — MCP server is ready immediately for stdio communication
+---
+
+## 2026-03-04 — US-007: Graceful shutdown and signal handling
+- Created kvlar-proxy/src/shutdown.rs with CancellationToken-based signal handling
+- signal_shutdown_token() listens for SIGTERM/SIGINT (Unix) or Ctrl+C (Windows)
+- Logs "shutting down..." on signal receipt
+- StdioTransport::run() uses tokio::select! to race proxy loop vs shutdown signal
+- McpProxy::run() uses tokio::select! in accept loop, breaks on shutdown
+- Both transports flush audit log and clean up child processes on shutdown
+- Added AuditLogger::flush() method for explicit file sink flushing
+- Added tokio-util to workspace deps for CancellationToken
+- 3 new tests (token manual, child tokens, shutdown timeout), 112 total
+- Files: shutdown.rs, stdio.rs, proxy.rs, lib.rs, logger.rs, Cargo.toml (workspace + proxy)
+- **Learnings:**
+  - tokio-util CancellationToken is lightweight — no Arc needed, clone is cheap
+  - tokio::select! is the right pattern for "run until signal or completion"
+  - AuditSink::File uses std::fs::File which buffers — flush() ensures persistence
+  - Unix signals need separate signal() listeners for SIGTERM and SIGINT
+---
+
+## 2026-03-04 — US-008: Comprehensive error handling and health check
+- Created kvlar-proxy/src/health.rs: ProxyStats (atomic counters), HealthStatus (JSON), run_health_server (raw HTTP)
+- ProxyStats tracks: uptime, requests_evaluated, requests_allowed/denied/approval, rules_count, policy_loaded
+- Health server responds to GET /health with JSON, 404 for anything else
+- Added upstream_error_response() and parse_error_response() to mcp.rs
+- Handler now sends JSON-RPC parse error response for malformed messages (instead of silently passing through)
+- Upgraded upstream disconnect/error logging from debug to warn/error level
+- Added health_addr to ProxyConfig, --health CLI flag, integrated into McpProxy::run()
+- 5 new tests (stats, recording, policy info, serialization, health server HTTP), 117 total
+- Files: health.rs, mcp.rs, handler.rs, proxy.rs, config.rs, lib.rs, main.rs
+- **Learnings:**
+  - AtomicU64 with Ordering::Relaxed is sufficient for counters — no synchronization needed for stats
+  - Raw TCP HTTP server is <50 lines — no need for hyper/axum dependency for /health
+  - McpError struct has code, message, data fields — not raw serde_json::Value
+  - Malformed JSON-RPC should get parse error responses, not silent passthrough (was a security gap)
+---

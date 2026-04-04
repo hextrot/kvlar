@@ -1,0 +1,146 @@
+{
+  "project": "Kvlar SDK",
+  "branchName": "ralph/v0.3.0-features",
+  "description": "Kvlar v0.3.0 — structured errors, approval webhooks, Python SDK, production hardening",
+  "qualityChecks": {
+    "build": "cargo build --workspace",
+    "test": "cargo test --workspace",
+    "lint": "cargo clippy --workspace -- -D warnings",
+    "format": "cargo fmt --all -- --check"
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Publish v0.2.0 crates to crates.io",
+      "description": "Publish all 4 workspace crates (kvlar-audit, kvlar-core, kvlar-proxy, kvlar-cli) at v0.2.0 to crates.io so users can install via cargo install.",
+      "acceptanceCriteria": [
+        "All 4 crates published to crates.io at v0.2.0",
+        "cargo install kvlar-cli installs v0.2.0",
+        "No publish errors or dependency issues"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Published in dependency order: kvlar-audit, kvlar-core, kvlar-proxy, kvlar-cli. All 4 at v0.2.0."
+    },
+    {
+      "id": "US-002",
+      "title": "Structured error responses with machine-readable denial reasons",
+      "description": "Add structured error detail types to kvlar-core so denial reasons include error codes, categories, and matched rule metadata. This enables programmatic error handling by agents and integrations.",
+      "acceptanceCriteria": [
+        "ErrorDetail struct with code, category, rule_id, message fields",
+        "PolicyDecision::Deny and RequireApproval carry ErrorDetail",
+        "Proxy returns structured JSON error in MCP tool result isError responses",
+        "Existing tests updated, new tests for error detail serialization",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace -- -D warnings passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "ErrorDetail struct in kvlar-core, _kvlar metadata in proxy responses. 6 new tests."
+    },
+    {
+      "id": "US-003",
+      "title": "Human approval webhook — core types and ApprovalBackend trait",
+      "description": "Define the core types and trait for human approval in kvlar-core. When a policy evaluates to RequireApproval, the system needs a way to request and await human decisions.",
+      "acceptanceCriteria": [
+        "ApprovalRequest struct (request_id, action, rule_id, reason, timestamp)",
+        "ApprovalResponse enum (Approved, Denied with optional reason)",
+        "ApprovalBackend trait with async request_approval method",
+        "Types are serializable (serde Serialize/Deserialize)",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace -- -D warnings passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "ApprovalRequest/ApprovalResponse in kvlar-core (pure). ApprovalBackend trait + DenyAllApprovalBackend in kvlar-proxy. Boxed futures for dyn safety."
+    },
+    {
+      "id": "US-004",
+      "title": "Human approval webhook — HTTP webhook transport",
+      "description": "Implement an HTTP webhook ApprovalBackend that POSTs approval requests to a configured URL and polls/receives the decision.",
+      "acceptanceCriteria": [
+        "WebhookApprovalBackend implements ApprovalBackend trait",
+        "Sends POST with ApprovalRequest JSON to configured webhook URL",
+        "Supports configurable timeout (default 5 minutes)",
+        "Supports callback mode (webhook POSTs back) and poll mode (proxy polls endpoint)",
+        "Proxy integrates approval flow: RequireApproval -> webhook -> await -> forward or deny",
+        "CLI --approval-webhook flag to configure webhook URL",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace -- -D warnings passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "WebhookApprovalBackend uses reqwest. Synchronous request-response pattern. Handler integrates approval flow for RequireApproval decisions. CLI --approval-webhook and --approval-timeout flags."
+    },
+    {
+      "id": "US-005",
+      "title": "Python SDK — ADR and subprocess wrapper",
+      "description": "Write an ADR for the Python SDK approach, then implement a subprocess-based Python wrapper that shells out to the kvlar binary.",
+      "acceptanceCriteria": [
+        "ADR document at docs/adr/adr-005-python-sdk.md",
+        "Python package structure at sdks/python/kvlar/",
+        "KvlarEngine class that wraps kvlar CLI subprocess calls",
+        "evaluate() method that takes action dict and returns decision",
+        "test_policy() method that runs kvlar test",
+        "Basic pytest test suite passing",
+        "pyproject.toml with package metadata"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "ADR-005 written. KvlarEngine subprocess wrapper with evaluate(), test_policy(), validate(). 18 pytest tests passing. Package at sdks/python/."
+    },
+    {
+      "id": "US-006",
+      "title": "Integration tests with real MCP server",
+      "description": "Add integration tests that spin up a real MCP server (filesystem server), proxy it through Kvlar, and verify end-to-end policy enforcement.",
+      "acceptanceCriteria": [
+        "Integration test module in kvlar-proxy/tests/",
+        "Tests spawn @modelcontextprotocol/server-filesystem via npx",
+        "Test: allowed tool call passes through and returns real result",
+        "Test: denied tool call is blocked and returns error",
+        "Test: require_approval tool call is blocked pending approval",
+        "Tests are marked #[ignore] by default (require npx/node)",
+        "CI workflow runs ignored tests in a separate job with Node.js",
+        "cargo test --workspace passes (ignored tests don't break default run)"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "4 integration tests in kvlar-proxy/tests/mcp_integration.rs. Spawn real @modelcontextprotocol/server-filesystem via npx. Tests: allow passthrough, deny blocked, require_approval blocked, non-tool-call passthrough. All #[ignore] by default."
+    },
+    {
+      "id": "US-007",
+      "title": "Graceful shutdown and signal handling",
+      "description": "Handle SIGTERM/SIGINT gracefully — drain active connections, flush audit logs, and exit cleanly. Critical for Docker/K8s deployments.",
+      "acceptanceCriteria": [
+        "SIGTERM and SIGINT handlers installed on proxy startup",
+        "Active tool call evaluations complete before shutdown",
+        "Audit log is flushed before exit",
+        "Upstream child process (stdio mode) is terminated cleanly",
+        "Shutdown timeout (default 30s) force-kills if drain takes too long",
+        "Log message on graceful shutdown: 'shutting down...'",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace -- -D warnings passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "shutdown.rs module with signal_shutdown_token() using CancellationToken. StdioTransport and McpProxy both integrate signal-aware shutdown. AuditLogger.flush() added. 3 new tests, 112 total."
+    },
+    {
+      "id": "US-008",
+      "title": "Comprehensive error handling and health check endpoint",
+      "description": "Add robust error handling for proxy pipeline failures (upstream timeout, disconnect, malformed messages) and a /health endpoint for liveness probes.",
+      "acceptanceCriteria": [
+        "Upstream disconnect: proxy returns error to agent, logs event, does not crash",
+        "Upstream timeout: configurable timeout (default 60s), returns timeout error to agent",
+        "Malformed JSON-RPC: proxy returns parse error, continues processing",
+        "Health check: GET /health returns 200 OK with JSON status (for TCP mode)",
+        "Health check includes: uptime, policy_loaded, rules_count, requests_evaluated",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace -- -D warnings passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "health.rs module with ProxyStats (atomics), HealthStatus JSON, run_health_server (raw HTTP). Error handling: parse_error_response for malformed JSON-RPC, upstream_error_response for disconnects. --health CLI flag. 5 new tests, 117 total."
+    }
+  ]
+}
