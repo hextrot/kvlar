@@ -121,7 +121,17 @@ pub fn is_kvlar_wrapped(entry: &McpServerEntry) -> bool {
 }
 
 /// Wrap an MCP server entry to run through Kvlar.
-pub fn wrap_entry(entry: &McpServerEntry, kvlar_bin: &str, policy_path: &Path) -> McpServerEntry {
+///
+/// When `api_key` is provided, `--api-key` (and optionally `--agent-id`) are
+/// injected into the generated proxy command so that cloud mode is active
+/// whenever the MCP client launches the wrapped server.
+pub fn wrap_entry(
+    entry: &McpServerEntry,
+    kvlar_bin: &str,
+    policy_path: &Path,
+    api_key: Option<&str>,
+    agent_id: Option<&str>,
+) -> McpServerEntry {
     let policy_str = policy_path.to_string_lossy().to_string();
 
     let mut new_args = vec![
@@ -129,9 +139,20 @@ pub fn wrap_entry(entry: &McpServerEntry, kvlar_bin: &str, policy_path: &Path) -
         "--stdio".to_string(),
         "--policy".to_string(),
         policy_str,
-        "--".to_string(),
-        entry.command.clone(),
     ];
+
+    // Cloud mode: inject API key and agent ID so the proxy connects to SHIELD.
+    if let Some(key) = api_key {
+        new_args.push("--api-key".to_string());
+        new_args.push(key.to_string());
+    }
+    if let Some(id) = agent_id {
+        new_args.push("--agent-id".to_string());
+        new_args.push(id.to_string());
+    }
+
+    new_args.push("--".to_string());
+    new_args.push(entry.command.clone());
     new_args.extend(entry.args.clone());
 
     McpServerEntry {
@@ -238,6 +259,8 @@ mod tests {
             &entry,
             "/usr/local/bin/kvlar",
             Path::new("/home/user/.kvlar/policy.yaml"),
+            None,
+            None,
         );
         assert_eq!(wrapped.command, "/usr/local/bin/kvlar");
         assert_eq!(
@@ -307,6 +330,63 @@ mod tests {
     }
 
     #[test]
+    fn test_wrap_entry_with_cloud_settings() {
+        let entry = McpServerEntry {
+            command: "npx".into(),
+            args: vec!["-y".into(), "some-server".into()],
+            extra: serde_json::Map::new(),
+        };
+
+        let wrapped = wrap_entry(
+            &entry,
+            "kvlar",
+            Path::new("/policy.yaml"),
+            Some("kvlar_sk_test123"),
+            Some("agent-uuid-456"),
+        );
+
+        assert_eq!(wrapped.command, "kvlar");
+        assert_eq!(
+            wrapped.args,
+            vec![
+                "proxy",
+                "--stdio",
+                "--policy",
+                "/policy.yaml",
+                "--api-key",
+                "kvlar_sk_test123",
+                "--agent-id",
+                "agent-uuid-456",
+                "--",
+                "npx",
+                "-y",
+                "some-server"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_wrap_entry_api_key_only() {
+        let entry = McpServerEntry {
+            command: "node".into(),
+            args: vec!["server.js".into()],
+            extra: serde_json::Map::new(),
+        };
+
+        let wrapped = wrap_entry(
+            &entry,
+            "kvlar",
+            Path::new("/policy.yaml"),
+            Some("kvlar_sk_abc"),
+            None,
+        );
+
+        assert!(wrapped.args.contains(&"--api-key".to_string()));
+        assert!(wrapped.args.contains(&"kvlar_sk_abc".to_string()));
+        assert!(!wrapped.args.contains(&"--agent-id".to_string()));
+    }
+
+    #[test]
     fn test_wrap_preserves_env() {
         let mut extra = serde_json::Map::new();
         extra.insert("env".into(), serde_json::json!({"API_KEY": "secret123"}));
@@ -317,7 +397,7 @@ mod tests {
             extra,
         };
 
-        let wrapped = wrap_entry(&entry, "kvlar", Path::new("/policy.yaml"));
+        let wrapped = wrap_entry(&entry, "kvlar", Path::new("/policy.yaml"), None, None);
         assert!(wrapped.extra.contains_key("env"));
         assert_eq!(
             wrapped.extra["env"]["API_KEY"].as_str().unwrap(),

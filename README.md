@@ -78,6 +78,60 @@ kvlar test -f my-policy.test.yaml --json     # JSON output for CI
 kvlar unwrap           # restore original MCP server commands
 ```
 
+## Cloud Mode (SHIELD)
+
+Connect Kvlar to [SHIELD](https://app.kvlar.io) for centralized policy management, real-time audit streaming, and human-in-the-loop escalation approvals.
+
+### Cloud Quickstart
+
+```bash
+# 1. Get your API key and agent ID from the dashboard
+kvlar init --cloud    # prints step-by-step setup instructions
+
+# 2. Wrap your MCP servers in cloud mode
+kvlar wrap --api-key kvlar_sk_... --agent-id <uuid>
+```
+
+When cloud mode is active, the generated MCP client config includes your credentials:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "/usr/local/bin/kvlar",
+      "args": [
+        "proxy", "--stdio",
+        "--policy", "/Users/you/.kvlar/policy.yaml",
+        "--api-key", "kvlar_sk_...",
+        "--agent-id", "<uuid>",
+        "--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"
+      ]
+    }
+  }
+}
+```
+
+### What cloud mode enables
+
+| Feature | Local mode | Cloud mode |
+|---------|-----------|-----------|
+| Policy enforcement | ✓ | ✓ |
+| Local audit log (JSONL) | ✓ | ✓ |
+| Centralized audit streaming (RADAR) | — | ✓ |
+| SHIELD escalation dashboard | — | ✓ |
+| Remote policy management | — | ✓ |
+
+### Proxy flags for cloud mode
+
+```bash
+kvlar proxy --stdio --policy policy.yaml \
+  --api-key kvlar_sk_...  \   # SHIELD API key (enables cloud mode)
+  --agent-id <uuid>       \   # Agent ID registered in SHIELD
+  -- npx my-server
+```
+
+Visit [app.kvlar.io](https://app.kvlar.io) to manage policies, review escalations, and explore audit logs.
+
 ## CLI Commands
 
 | Command | Description |

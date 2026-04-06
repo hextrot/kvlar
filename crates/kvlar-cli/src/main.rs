@@ -27,6 +27,13 @@ enum Commands {
         /// Path to the policy YAML file or directory.
         #[arg(short, long)]
         policy: PathBuf,
+
+        /// (Future) Validate cloud configuration — check that SHIELD API key and
+        /// agent ID are reachable. Run `kvlar init --cloud` to set up cloud mode.
+        /// Placeholder: this flag is accepted today and will be implemented in a
+        /// future release.
+        #[arg(long)]
+        cloud: bool,
     },
 
     /// Evaluate an action against a policy (for testing).
@@ -140,6 +147,11 @@ enum Commands {
         /// List all available templates with descriptions.
         #[arg(long)]
         list: bool,
+
+        /// Print instructions for setting up cloud mode (SHIELD API key + agent ID).
+        /// Cloud mode routes escalations and audit events to app.kvlar.io.
+        #[arg(long)]
+        cloud: bool,
     },
 
     /// Wrap existing MCP servers with Kvlar security proxy.
@@ -286,7 +298,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Validate { policy } => cmd_validate(&policy),
+        Commands::Validate { policy, cloud } => cmd_validate(&policy, cloud),
         Commands::Evaluate {
             policy,
             action_type,
@@ -322,7 +334,12 @@ fn main() {
             agent_id,
             upstream_cmd,
         ),
-        Commands::Init { dir, template, list } => cmd_init(dir, &template, list),
+        Commands::Init {
+            dir,
+            template,
+            list,
+            cloud,
+        } => cmd_init(dir, &template, list, cloud),
         Commands::Wrap {
             client,
             config,
@@ -363,7 +380,13 @@ fn main() {
     }
 }
 
-fn cmd_validate(policy_path: &std::path::Path) {
+fn cmd_validate(policy_path: &std::path::Path, cloud: bool) {
+    if cloud {
+        println!("Note: --cloud validation is a future feature.");
+        println!("  It will verify your SHIELD API key and agent ID are reachable.");
+        println!("  Set up cloud mode with: kvlar init --cloud");
+        println!();
+    }
     if policy_path.is_dir() {
         match kvlar_core::Policy::from_dir(policy_path) {
             Ok(policies) => {
@@ -876,7 +899,32 @@ fn resolve_policy_extends(policy: &mut kvlar_core::Policy) {
     }
 }
 
-fn cmd_init(dir: Option<PathBuf>, template: &str, list: bool) {
+fn cmd_init(dir: Option<PathBuf>, template: &str, list: bool, cloud: bool) {
+    // --cloud: print cloud setup instructions and exit
+    if cloud {
+        println!("Kvlar Cloud Mode — connect to SHIELD for centralized security management");
+        println!();
+        println!("  SHIELD gives you:");
+        println!("    • Centralized policy management across all agents");
+        println!("    • Real-time audit log streaming to kvlar-radar");
+        println!("    • Human-in-the-loop escalation approvals via the dashboard");
+        println!("    • API-key authenticated policy evaluation (< 50ms)");
+        println!();
+        println!("  Step 1 — Get your API key:");
+        println!("    https://app.kvlar.io/settings/api-keys");
+        println!();
+        println!("  Step 2 — Register your agent:");
+        println!("    https://app.kvlar.io/agents/new");
+        println!("    (Copy the Agent ID UUID shown after creating the agent)");
+        println!();
+        println!("  Step 3 — Wrap your MCP servers in cloud mode:");
+        println!("    kvlar wrap --api-key kvlar_sk_... --agent-id <uuid>");
+        println!();
+        println!("  The wrapped proxy will route escalations and audit events to SHIELD.");
+        println!("  Restart your MCP client after wrapping.");
+        return;
+    }
+
     // --list: show all available templates with descriptions
     if list {
         println!("Available kvlar init templates:");
@@ -1074,7 +1122,13 @@ fn cmd_wrap(
         }
 
         let orig_cmd = format!("{} {}", entry.command, entry.args.join(" "));
-        let wrapped = client_config::wrap_entry(entry, &kvlar_bin, &abs_policy);
+        let wrapped = client_config::wrap_entry(
+            entry,
+            &kvlar_bin,
+            &abs_policy,
+            api_key.as_deref(),
+            agent_id.as_deref(),
+        );
 
         if dry_run {
             println!("  Would wrap {}: {}", name, orig_cmd);
